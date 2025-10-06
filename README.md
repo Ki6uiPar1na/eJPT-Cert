@@ -27,5 +27,3 @@ Below is an index of the Markdown files in this repo for quick navigation.
 			- [0x03-Port Scan with Auxiliary Module](<Assesment Methodology/0x01 - Enumeration/Nmap Scripting Engine(NSE)/0x03-Port Scan with Auxiliary Module.md>)
 		- Service Enum/
 			- [0x00-FTP enum](<Assesment Methodology/0x01 - Enumeration/Service Enum/0x00-FTP enum.md>)
-
-If you'd like the index exported as a flat list, or to add descriptions for each file, tell me which format you prefer and I will update this README.
