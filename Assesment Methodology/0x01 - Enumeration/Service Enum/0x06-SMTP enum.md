@@ -1,4 +1,4 @@
-# 0x06 - SMTP enumeration (merged + beautified)
+# 0x06 - SMTP enumeration
 
 Below I preserved your original notes (above) exactly as you wrote them. The section below is a merged, cleaned, and expanded version that organizes steps, commands, and native exploitation approaches for lab and engagement use.
 
@@ -196,7 +196,3 @@ nc demo.ine.local 25
 smtp-user-enum -M RCPT -U users.txt -t demo.ine.local
 swaks --server demo.ine.local:25 --auth LOGIN --auth-user alice --auth-password 'P@ss'
 ```
-
----
-
-If you'd like, I can also add the helper scripts to `tools/` (choose `smtp-enum.sh`, `smtp-relay-test.sh`, and/or `smtp-auth-mailer.py`) and I will run quick lint/sanity checks on them before committing.
