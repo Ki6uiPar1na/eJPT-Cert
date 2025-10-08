@@ -255,10 +255,4 @@ msf6 auxiliary(http_login) > run
 - OWASP Testing Guide (web enumeration sections)
 - Metasploit auxiliary module docs (within msfconsole: `info <module>`)
 
----
 
-If you want, I can:
-- Add a ready-to-run `recon-web.sh` script that runs the safe `nmap`, `curl`, `nmblookup`/`http_version` checks and saves output to `loot/web/demo.ine.local/`.
-- Add sample `users.txt` and `passwords.txt` templates (small, safe lists) under `tools/`.
-
-Tell me which and I will create the files and commit them to the repo.
