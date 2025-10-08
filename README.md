@@ -102,10 +102,3 @@ Active recon lets you find hosts, ports and services but is noisy. Only do this 
 	- DNS Zone Transfers: [link](Assesment%20Methodology/0x00%20-%20Information-Gathering/Active/0x02-DNS-Zone-Transfers.md)
 	- Subdomain Enumeration: [link](Assesment%20Methodology/0x00%20-%20Information-Gathering/Active/0x03-subdomain%20Enum.md)
 
-If you want, I can:
-
-- Expand each link into a one-paragraph summary pulled from the target file's first heading/intro.
-- Percent-encode every file path everywhere (already done for the most fragile ones); or rename files to remove spaces and update links.
-- Produce a printable cheat-sheet PDF with the core commands.
-
-Tell me which follow-up you'd like and I will apply it.
