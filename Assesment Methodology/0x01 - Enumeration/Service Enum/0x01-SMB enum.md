@@ -1,327 +1,420 @@
-# SMB Enumeration (SMB/NetBIOS)
+# SMB Enumeration (SMB/NetBIOS) — quick reference and Metasploit details
 
-A practical, step-by-step reference for enumerating Windows file sharing (SMB) services during authorized assessments.
+Short notes:
+- Protocol: SMB (Server Message Block)
+- Common ports: 445/TCP (SMB over TCP), 139/TCP (NetBIOS session)
+- Samba: Linux implementation of the SMB/CIFS protocol
 
-- Protocol: Server Message Block (SMB)
-- Common ports: 445/TCP (SMB over TCP), 139/TCP (NetBIOS Session Service)
-- Samba: Linux/Unix implementation of SMB
-
-> Legal/Ethics: Only test targets you own or are explicitly authorized to assess.
+Always have explicit authorization before testing.
 
 ---
 
-## Quick start: What to try first
+## Quick useful commands (outside Metasploit)
 
 ```bash
-# Set a convenience variable for the target IP
 export TARGET=10.10.10.10
-```
-
-1) Check open ports and versions
-```bash
+# Port & basic version scan
 nmap -p139,445 -sV -Pn $TARGET
-nmap -p445 --script smb-os-discovery,smb2-security-mode,smb2-time $TARGET
-```
 
-2) Try anonymous/null session
-```bash
-# List shares anonymously (null session)
+# NSE scripts for SMB discovery
+nmap -p445 --script smb-os-discovery,smb-enum-shares,smb-enum-users,smb2-security-mode $TARGET
+
+# Try anonymous share listing
 smbclient -L //$TARGET/ -N
-# Alternative null auth form
-smbclient -L //$TARGET/ -U ''%''
-```
 
-3) Enumerate more details (no creds/with creds)
-```bash
-# NSE scripts (anonymous where possible)
-nmap -p445 --script smb-enum-shares,smb-enum-users,smb-security-mode $TARGET
+# Quick share map (smbmap)
+smbmap -H $TARGET
 
-# smbmap for share listing
-smbmap -H $TARGET                 # anonymous
-smbmap -H $TARGET -u anonymous -p ""
-
-# enum4linux (classic) or enum4linux-ng
-enum4linux -a $TARGET             # if installed
-enum4linux-ng -A $TARGET          # newer fork, if installed
-```
-
-4) If you have credentials
-```bash
-# List shares with creds
-smbclient -L //$TARGET/ -U USER
-# Quick non-interactive (avoid prompt)
-smbclient -L //$TARGET/ -U USER%PASS
-# Access a share
-smbclient //${TARGET}/SHARE -U USER%PASS
+# Enumerate lots of SMB info (enum4linux)
+enum4linux -a $TARGET
 ```
 
 ---
 
-## Discovery and scanning
+## NetBIOS name lookup: nmblookup
 
-### Nmap: ports, versions, and scripts (NSE)
+Use `nmblookup` (part of the Samba tools) to query NetBIOS names and discover the host's NetBIOS name, workgroup/domain, and registered services. This is a lightweight, fast pre-check before deeper SMB/SMB2/SMB3 enumeration.
+
+Common commands
 
 ```bash
-# Fast port check and service versions
-nmap -p139,445 -sV -Pn $TARGET
+# Query NetBIOS name table by host IP (recommended)
+nmblookup -A $TARGET   # note: lowercase 'nmblookup' is common; some systems just use 'nmblookup'
+# Example: nmblookup -A 10.10.10.10
 
-# Operating system and SMB2/3 security mode info
-nmap -p445 --script smb-os-discovery,smb2-security-mode,smb2-time $TARGET
+# Query a NetBIOS name via broadcast/WINS (resolve a name to IP)
+nmblookup NAME          # e.g. nmblookup WORKGROUP or nmblookup TARGET-BOX
 
-# Shares and users (anonymous where possible)
-nmap -p445 --script smb-enum-shares,smb-enum-users $TARGET
-
-# Protocol capabilities and dialects
-nmap -p445 --script smb-protocols,smb2-capabilities $TARGET
-
-# (Optional) Vulnerability checks — only if authorized
-nmap -p445 --script smb-vuln-ms17-010 $TARGET
+# Windows equivalent (if on Windows):
+# nbtscan or nbtstat -A <ip>
 ```
+
+Example output (from `nmblookup -A 10.10.10.10`)
+
+```
+Looking up status of 10.10.10.10
+        WORKGROUP        <00> -         B <ACTIVE>
+        TARGET-BOX       <00> -         B <ACTIVE>
+        TARGET-BOX       <20> -         B <ACTIVE>
+
+        MAC Address = 00:0c:29:ab:cd:ef
+```
+
+Interpreting the output
+- The left column contains NetBIOS names registered by the host (workgroup/computer name).
+- The numeric suffix (e.g., `<00>`, `<20>`) is the NetBIOS service type:
+  - `<00>` — workstation/service name (common host name entry)
+  - `<20>` — file server service (SMB server)
+  - Other suffixes exist (e.g., browser/master roles) — consult Samba docs for a full list.
+- `MAC Address` is often shown with `-A` and can help identify VM vs physical hosts.
+
+Why this is useful
+- Confirms the host advertises SMB/File Server service (`<20>`).
+- Reveals NetBIOS name and workgroup/domain used by the target — helpful for credential targeting and AD-aware enumeration.
+- Fast and quiet compared to a full Nmap scan; good initial reconnaissance step.
 
 Notes
-- Use `-Pn` if ICMP is blocked.
-- Some scripts require credentials; provide with `--script-args smbuser=USER,smbpass=PASS`.
+- `nmblookup` requires network reachability to the NetBIOS service (port 137/UDP for name queries, and `-A` contacts the host directly).
+- Modern environments may deprecate NetBIOS (WINS) in favor of DNS + SMB over TCP (445); if NetBIOS is disabled, `nmblookup` may return little or nothing.
 
 ---
 
-## Anonymous and authenticated enumeration
+## rpcclient (MS-RPC enumeration)
 
-### smbclient
-`smbclient` is the Swiss-army knife for SMB share enumeration and file access.
+`rpcclient` is a powerful Samba tool that connects to the Microsoft RPC service exposed over SMB and provides many enumeration commands. It often succeeds where anonymous SMB listing fails and can enumerate domain users, groups, shares, and a range of other useful information.
 
-```bash
-# List shares anonymously (null session)
-smbclient -L //$TARGET/ -N
-
-# List shares with a username (will prompt for password)
-smbclient -L //$TARGET/ -U USER
-
-# List shares with explicit user:pass (no prompt)
-smbclient -L //$TARGET/ -U USER%PASS
-
-# Connect to a share (interactive shell)
-smbclient //${TARGET}/SHARE -U USER%PASS
-```
-
-Inside smbclient (common commands)
-- `help` — list commands
-- `ls` / `cd` / `pwd` — navigate
-- `get file` / `put file` — download/upload
-- `mget *` — multi-download (use `recurse ON`, `prompt OFF` for bulk)
-- `lcd <path>` — set local download directory
-- `exit` — quit
-
-Tip: If SMBv1 is disabled or the server enforces newer dialects, force a protocol:
-```bash
-# Try forcing SMB3 or SMB2
-auth SMB3: smbclient -m SMB3 -L //$TARGET/ -U USER%PASS
-auth SMB2: smbclient -m SMB2 -L //$TARGET/ -U USER%PASS
-```
-
-### smbmap
-`smbmap` quickly enumerates share permissions and accessibility.
+Basic usage
 
 ```bash
-# Anonymous checks
-smbmap -H $TARGET
-smbmap -H $TARGET -u anonymous -p ""
-
-# With credentials
-smbmap -H $TARGET -u USER -p PASS
-
-# Recursively list a specific share
-smbmap -H $TARGET -u USER -p PASS -r SHARE
-
-# Save file lists to disk
-smbmap -H $TARGET -u USER -p PASS -r SHARE --download '*'   # careful: may be large
-```
-
-### rpcclient
-`rpcclient` enumerates users, groups, and policies via MS-RPC.
-
-```bash
-# Null session
+# Null-session (anonymous) connection
 rpcclient -U "" -N $TARGET
-# Authenticated
-rpcclient -U USER%PASS $TARGET
-```
-Once connected, useful commands:
-- `enumdomusers` — list domain users
-- `queryuser <RID>` — details for a specific user
-- `enumdomgroups` — list groups
-- `enumalsgroups domain` — list alias groups
-- `lookupnames <name>` — resolve names to RIDs
-- `lsaquery` — domain info
 
-### enum4linux / enum4linux-ng
-Automates many of the above checks.
+# Authenticated connection (username and password)
+rpcclient -U 'USER%PASS' $TARGET
+
+# Authenticated with domain (DOMAIN\USER)
+rpcclient -U 'DOMAIN\\USER%PASS' $TARGET
+```
+
+Start an interactive session and run commands
 
 ```bash
-enum4linux -a $TARGET
-# or
-enum4linux-ng -A $TARGET
+# Connect anonymously and drop into an rpcclient prompt
+rpcclient -U "" -N 10.10.10.10
+
+# At the rpcclient prompt, run commands like:
+srvinfo                 # show server info and OS hints
+enumdomusers            # enumerate domain users
+enumdomgroups           # enumerate domain groups
+lookupnames <name>      # resolve NetBIOS name(s) to RIDs/IPs
+lookuprid <RID>         # map RID back to a name
+queryuser <RID|name>    # user details (if available)
+netshareenum            # list shares via RPC
+netsharegetinfo SHARE   # detailed info about a share
+lsaquery                # query LSA/Domain info
+
+# Example sequence
+rpcclient $> srvinfo
+rpcclient $> enumdomusers
+rpcclient $> lookupnames administrator
+rpcclient $> netshareenum
 ```
+
+Example session (trimmed)
+
+```
+$ rpcclient -U "" -N 10.10.10.10
+rpcclient $> srvinfo
+Server OS: Windows 6.1 (Build 7601: Service Pack 1)
+Server Name: TARGET-BOX
+Domain Name: WORKGROUP
+
+rpcclient $> enumdomusers
+RID: 0x1f4 Username: Administrator
+RID: 0x1f5 Username: Guest
+RID: 0x1f6 Username: john
+
+rpcclient $> netshareenum
+Share: ADMIN$
+Share: C$
+Share: public
+```
+
+When to use `rpcclient`
+- Use it when `smbclient` or NSE scripts don't show user or domain information.
+- It is particularly useful against domain-joined hosts and for enumerating Active Directory-related info when SMB is available.
+
+Notes and caveats
+- Some commands require elevated privileges or a domain context to return full results.
+- Anonymous/null sessions may be disabled; use valid credentials when needed.
+- `rpcclient` output is textual and intended to be inspected; redirect output to files for later parsing.
 
 ---
 
-## Metasploit approach (optional)
+## Metasploit: workflow, commands, and explanations
 
-Start Metasploit and create a workspace (optional but recommended):
-```bash
+This section expands and corrects the msfconsole workflow from basic discovery through enumeration and credential testing. Replace `10.10.10.10` with your target IP and adjust `USER`, `PASS` or file paths as needed.
+
+### 1) Start Metasploit and database
+
+Open msfconsole and ensure the database is initialized and connected (important for workspaces and storing loot):
+
+```text
+#start the database
+sudo service postgresql start  
+```
+
+```text
+# start msfconsole from shell
 msfconsole
-# inside msfconsole
-workspace -a smb_enum
+
+# inside msfconsole (ensure database is online)
+msf6 > db_status
+# if not connected:
+msf6 > db_connect
+# (on modern installs this is often automatic)
 ```
 
-Common SMB auxiliary modules:
+Create or switch to a workspace to keep data isolated:
 
-1) Version detection
 ```text
-use auxiliary/scanner/smb/smb_version
-set RHOSTS $TARGET
-set RPORT 445
-run
+# create a new workspace
+msf6 > workspace -a smb_enum
+# switch to the workspace
+msf6 > workspace smb_enum
+msf6 > workspace
 ```
 
-2) Enumerate users
-```text
-use auxiliary/scanner/smb/smb_enumusers
-set RHOSTS $TARGET
-set RPORT 445
-# Optional creds if anonymous fails
-# set SMBUser USER
-# set SMBPass PASS
-run
+You can use `workspace` to separate engagements.
+
+### 2) SMB version detection
+
+Module: auxiliary/scanner/smb/smb_version
+Purpose: identify SMB dialect, NetBIOS name, OS details — useful to choose later modules.
+
+```
+msf6 > search type:auxiliary smb_version
+msf6 > use auxiliary/scanner/smb/smb_version
+msf6 auxiliary(smb_version) > show options
+
+# Required options
+# RHOSTS: target(s)
+# RPORT: 445 (default)
+
+msf6 auxiliary(smb_version) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_version) > set THREADS 10     # optional: parallelize
+msf6 auxiliary(smb_version) > run
 ```
 
-3) Enumerate shares
-```text
-use auxiliary/scanner/smb/smb_enumshares
-set RHOSTS $TARGET
-set RPORT 445
-set ShowFiles true   # also list files on accessible shares
-# Optional creds
-# set SMBUser USER
-# set SMBPass PASS
-run
+Example (sample) output you might see (trimmed):
+
+```
+[*] 10.10.10.10:445    - Host is likely running Windows 7 or Server 2008 R2
+[*] 10.10.10.10:445    - Protocol: SMBv2, dialect: 3.0.0
+[*] 10.10.10.10:445    - NetBIOS Computer Name: TARGET-BOX
 ```
 
-4) Password/spray login
-```text
-use auxiliary/scanner/smb/smb_login
-set RHOSTS $TARGET
-set RPORT 445
-set USER_FILE users.txt         # or set USERNAME USER
-set PASS_FILE passwords.txt     # or set PASSWORD PASS
-set STOP_ON_SUCCESS true
-set THREADS 10
-run
+Use this info to decide whether SMBv1-only tools are useful or whether you must target SMBv2/3.
+
+### 3) Enumerate users
+
+Module: auxiliary/scanner/smb/smb_enumusers
+Purpose: attempt to enumerate user accounts via SMB methods (null session, RPC, etc.).
+
+Notes: Some targets will not reveal users anonymously. If the target requires authentication, provide `SMBUser` and `SMBPass`.
+
+```
+msf6 > search type:auxiliary smb_enumusers
+msf6 > use auxiliary/scanner/smb/smb_enumusers
+msf6 auxiliary(smb_enumusers) > show options
+
+# Typical options
+# RHOSTS, RPORT
+# THREADS
+# SMBUser, SMBPass (optional)
+
+msf6 auxiliary(smb_enumusers) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_enumusers) > run
 ```
 
-> Tip: Use results from `smb_version` and `smb_enumusers` to guide next steps.
+Sample output (what to look for):
+
+```
+[*] Enumerating users for 10.10.10.10
+[*] Found: Administrator
+[*] Found: Guest
+[*] Found: john
+[*] Found: svc_backup
+```
+
+If `smb_enumusers` returns accounts, export/save the list for later password spraying or targeted brute force.
+
+### 4) Enumerate shares and optionally list files
+
+Module: auxiliary/scanner/smb/smb_enumshares
+Purpose: list SMB shares and optionally enumerate files within accessible shares (ShowFiles option).
+
+```
+msf6 > use auxiliary/scanner/smb/smb_enumshares
+msf6 auxiliary(smb_enumshares) > show options
+msf6 auxiliary(smb_enumshares) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_enumshares) > set ShowFiles true  # attempts to list files in readable shares
+msf6 auxiliary(smb_enumshares) > run
+```
+
+Sample output highlights:
+
+```
+[*] 10.10.10.10:445 - Enumerating shares
+[+] Share: ADMIN$  - Admin share (no listing)
+[+] Share: C$      - Admin hidden share
+[+] Share: public  - Readable
+[*] Listing files in share public:
+    - report.pdf
+    - password_backup.txt
+```
+
+Important: Listing files may require credentials; anonymous enumeration might only show share names.
+
+### 5) Try logins / password testing
+
+Module: auxiliary/scanner/smb/smb_login
+Purpose: attempt authentication using single credentials or lists (user/pass files). Use `STOP_ON_SUCCESS true` to halt when credentials are found.
+
+```
+msf6 > use auxiliary/scanner/smb/smb_login
+msf6 auxiliary(smb_login) > show options
+
+# Important options
+# RHOSTS, RPORT
+# USERNAME or USER_FILE
+# PASSWORD or PASS_FILE
+# STOP_ON_SUCCESS (true/false)
+# USER_AS_PASS (try username as password)
+# THREADS
+
+msf6 auxiliary(smb_login) > set RHOSTS 10.10.10.10
+# Single credential test
+msf6 auxiliary(smb_login) > set SMBUser administrator
+msf6 auxiliary(smb_login) > set SMBPass 'P@ssw0rd'
+msf6 auxiliary(smb_login) > run
+
+# Brute/spray from lists (recommended: small list, observe lockout policy)
+msf6 auxiliary(smb_login) > set USER_FILE /path/to/users.txt
+msf6 auxiliary(smb_login) > set PASS_FILE /path/to/passwords.txt
+msf6 auxiliary(smb_login) > set STOP_ON_SUCCESS true
+msf6 auxiliary(smb_login) > set THREADS 10
+msf6 auxiliary(smb_login) > run
+```
+
+Sample success output:
+
+```
+[*] 10.10.10.10:445 - SUCCESSFUL LOGIN: 10.10.10.10:445 - administrator:P@ssw0rd
+[+] Credentials saved to the database
+```
+
+After a successful authentication, export or note credentials immediately for follow-up actions.
+
+### 6) Using the credentials with Metasploit or external tools
+
+Once you have a valid username/password pair, you can use Metasploit post-auth modules or external tools like `smbclient`, `smbmap`, or `crackmapexec` to interact with shares.
+
+Example: list shares via `smbclient` using discovered creds
+
+```bash
+smbclient -L //10.10.10.10/ -U administrator%P@ssw0rd
+smbclient //10.10.10.10/public -U administrator%P@ssw0rd
+```
+
+Example: use the creds in Metasploit to run an authenticated scanner or a post module
+
+```
+# set creds as module options
+set SMBUser administrator
+set SMBPass P@ssw0rd
+# then run other smb_* auxiliary or post modules that accept SMBUser/SMBPass
+```
+
+### 7) Additional Metasploit tips & good practices
+
+- Use `set RHOSTS` for ranges and `RHOST` for single host depending on module; `show options` lists required variables.
+- `set THREADS` can speed up scanning but be careful to avoid noisy DoS-like behavior.
+- Use `workspace` to separate target data and `db_export`/`db_import` to move data.
+- Save credentials into Metasploit's DB with `creds` module integration (often automatic on success) for later use by other modules.
+- Respect account lockout policies — prefer password spraying with long delays rather than brute-force.
 
 ---
 
-## Password spraying and brute-force (use with extreme caution)
+## Example end-to-end (short flow)
 
-Prefer targeted password spraying over brute-force, and always respect rate limits and rules of engagement.
+1. Start msfconsole and workspace
 
-### Metasploit (shown above)
-Use `auxiliary/scanner/smb/smb_login` with small, vetted lists.
-
-### CrackMapExec (if installed)
-```bash
-# Basic host info
-crackmapexec smb $TARGET
-
-# Enumerate shares anonymously
-crackmapexec smb $TARGET -u '' -p '' --shares
-
-# With credentials
-crackmapexec smb $TARGET -u USER -p PASS --shares
-crackmapexec smb $TARGET -u USER -p PASS --users
+```
+msf6 > workspace -a smb_test
+msf6 > workspace smb_test
 ```
 
-### Hydra (falls back to SMB support; results vary by version)
-```bash
-# Hydra's smb module may target older SMB; prefer Metasploit/CME for SMBv2/3
-hydra -L users.txt -P passwords.txt smb://$TARGET
+2. Detect SMB version
+
+```
+msf6 > use auxiliary/scanner/smb/smb_version
+msf6 auxiliary(smb_version) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_version) > run
 ```
 
----
+3. Enumerate users
 
-## After credentials: access and data collection
-
-### Interactive access with smbclient
-```bash
-# Connect to share
-smbclient //${TARGET}/SHARE -U USER%PASS
-
-# In the smbclient shell
-lcd ~/loot/smb-$TARGET
-recurse ON
-prompt OFF
-mget *
-exit
+```
+msf6 > use auxiliary/scanner/smb/smb_enumusers
+msf6 auxiliary(smb_enumusers) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_enumusers) > run
 ```
 
-### Mount a share (Linux)
-```bash
-sudo mkdir -p /mnt/smbshare
-sudo mount -t cifs //${TARGET}/SHARE /mnt/smbshare \
-  -o username=USER,password=PASS,vers=3.0,uid=$(id -u),gid=$(id -g)
+4. Enumerate shares
 
-# After use
-sudo umount /mnt/smbshare
+```
+msf6 > use auxiliary/scanner/smb/smb_enumshares
+msf6 auxiliary(smb_enumshares) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_enumshares) > set ShowFiles true
+msf6 auxiliary(smb_enumshares) > run
 ```
 
-If mount fails, try a different `vers=` (e.g., `3.1.1`, `2.1`). Avoid SMB1 unless absolutely necessary.
+5. Attempt login (from a small safe list)
 
----
-
-## Troubleshooting and edge cases
-
-- SMBv1 disabled: Force a newer dialect with `smbclient -m SMB3 ...` or `-m SMB2`.
-- Domain vs local accounts: In some tools, specify domain as `DOMAIN/USER` or `USER@DOMAIN`.
-- Firewalls: ICMP may be blocked — add `-Pn` to Nmap; ports may be filtered.
-- Account lockout: Mind password policy; avoid lockouts with aggressive spraying.
-- Time skew: Kerberos/AD environments are sensitive to clock drift; ensure your system time is correct.
-
----
-
-## Quick cheat sheet
-
-```bash
-# Ports and version
-nmap -p139,445 -sV -Pn $TARGET
-nmap -p445 --script smb-os-discovery,smb2-security-mode $TARGET
-
-# Anonymous shares
-smbclient -L //$TARGET/ -N
-smbmap -H $TARGET -u anonymous -p ""
-
-# Users and shares via NSE
-nmap -p445 --script smb-enum-users,smb-enum-shares $TARGET
-
-# rpcclient
-rpcclient -U "" -N $TARGET    # then: enumdomusers, enumdomgroups
-
-# With creds
-smbclient -L //$TARGET/ -U USER%PASS
-smbclient //${TARGET}/SHARE -U USER%PASS
-smbmap -H $TARGET -u USER -p PASS -r SHARE
-
-# Metasploit
-use auxiliary/scanner/smb/smb_version
-use auxiliary/scanner/smb/smb_enumusers
-use auxiliary/scanner/smb/smb_enumshares
-use auxiliary/scanner/smb/smb_login
+```
+msf6 > use auxiliary/scanner/smb/smb_login
+msf6 auxiliary(smb_login) > set RHOSTS 10.10.10.10
+msf6 auxiliary(smb_login) > set USER_FILE /root/users.txt
+msf6 auxiliary(smb_login) > set PASS_FILE /root/passwords.txt
+msf6 auxiliary(smb_login) > set STOP_ON_SUCCESS true
+msf6 auxiliary(smb_login) > set THREADS 5
+msf6 auxiliary(smb_login) > run
 ```
 
 ---
 
-## Notes
-- Documentation assumes Linux attacker machine and typical tooling.
-- Replace `USER`, `PASS`, `DOMAIN`, `SHARE`, and `$TARGET` with actual values.
-- Keep detailed notes of shares, permissions, and interesting files for reporting.
+## Post-auth interaction (examples outside Metasploit)
+
+```bash
+# Using smbclient to list and access shares
+smbclient -L //10.10.10.10/ -U administrator%P@ssw0rd
+smbclient //10.10.10.10/public -U administrator%P@ssw0rd
+
+# Mount a share on Linux (CIFS)
+sudo mount -t cifs //10.10.10.10/public /mnt/smb -o username=administrator,password=P@ssw0rd,vers=3.0
+```
+
+---
+
+## Safety and troubleshooting
+
+- If a module complains about missing options, run `show options` and set variables as required.
+- Some modules expect `RHOSTS` (list/range) vs `RHOST` (single IP) — read `show options` carefully.
+- If enumeration fails without creds, try authenticated scans (if you have legitimate creds) or use other tools (`rpcclient`, `enum4linux`, `smbmap`).
+- Be cautious with `set THREADS` and large password lists — watch account lockout policies and target stability.
+
+---
+
+Keep this file as your quick SMB enumeration reference and adjust commands to match your local tool paths and policy constraints.
 
