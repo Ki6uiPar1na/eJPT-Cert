@@ -1,25 +1,34 @@
-# 0x02 Website Footprinting (robots, sitemap, Netcraft)
+# 0x02 — Website Footprinting
 
-Purpose: discover public site structure, disallowed paths, and hosting infrastructure.
+Goal: discover public structure, hidden paths, and historical content that reveal attack surface.
 
-Common checks:
+Common meta files
+- robots.txt — may list directories bots should avoid (useful to discover admin paths)
+  - `curl --silent --get https://example.com/robots.txt`
+- sitemap.xml — enumerates site URLs and priorities
+  - `curl --silent https://example.com/sitemap.xml`
+- security.txt (RFC 9116) — responsible disclosure contacts
+  - `curl --silent https://example.com/.well-known/security.txt`
+- humans.txt — occasionally contains team or contact info
+  - `curl --silent https://example.com/humans.txt`
 
-- robots.txt
-  - URL: `https://example.com/robots.txt`
-  - What to look for: `Disallow:` entries can reveal hidden admin paths or directories.
+Historical content
+- Wayback Machine (https://web.archive.org) — useful to find removed pages, older endpoints, or forgotten panels.
+- Google cache: `cache:example.com` (in Google search)
 
-- sitemap.xml
-  - URL: `https://example.com/sitemap.xml`
-  - What to look for: list of pages, language-specific paths, change frequency and priority.
+Crawling & mirroring (for offline analysis)
+- httrack (mirror site):
+  - `httrack "https://example.com" -O ./example_mirror --robots=0`
+  - Note: `--robots=0` ignores robots.txt — only use for authorized engagements.
 
-- Netcraft
-  - Use Netcraft extension or website to view server technologies, hosting provider, and historical records.
+Header inspection
+- Obtain server headers (may reveal server, frameworks, CDN):
+  - `curl -sI https://example.com`
 
-- Mirror / archive sites
-  - Check Wayback Machine and Google cache (`cache:example.com`) to find past content.
+Search engine queries
+- Use site: and inurl: operators to find specific file types or paths:
+  - `site:example.com inurl:admin`
 
-- Download mirror (for offline analysis)
-  - httrack example: `httrack "http://example.com" -O ./example_mirror`
-
-Notes:
-- Respect robots.txt for indexing but remember it doesn't prevent access — it only instructs crawlers.
+Notes & caution
+- robots.txt is a hint only — it does not prevent access. Use entries as leads, not excuses to breach.
+- Respect site terms and legal boundaries when mirroring or crawling.

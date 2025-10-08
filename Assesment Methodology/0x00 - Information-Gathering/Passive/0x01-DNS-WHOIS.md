@@ -1,21 +1,38 @@
-# 0x01 DNS & WHOIS (Passive)
+# 0x01 — DNS & WHOIS (Passive)
 
-Purpose: gather domain registration, ownership, and public DNS information without querying target hosts interactively beyond standard public lookups.
+Goal: gather registration and public DNS data to map ownership, hosting, mail servers, and public records.
 
-Commands and examples:
-
+Commands
 - whois
   - Usage: `whois example.com`
-  - Example: `whois target.example` — returns registrar, registration/expiry dates, name servers, contact emails (may be redacted).
+  - What to look for: registrar, registrant contact (may be privacy-protected), registration/expiry dates, name servers.
+
+- dig (recommended for structured DNS queries)
+  - A record: `dig @8.8.8.8 example.com A +short`
+  - MX records: `dig MX example.com +short`
+  - NS records: `dig NS example.com +short`
+  - TXT records: `dig TXT example.com +short`
+  - Any/all: `dig example.com ANY +short` (note: some DNS servers rate-limit or ignore ANY)
 
 - host
-  - Usage: `host target.example`
-  - Example: `host example.com` — shows A/AAAA records and name servers.
+  - Quick: `host example.com`
 
-- dig (DNS lookup utility)
-  - Usage: `dig +short example.com ANY`
-  - Example: `dig @8.8.8.8 example.com A` — query A record via Google DNS.
+- nslookup (interactive or one-liners)
+  - `nslookup -type=mx example.com 8.8.8.8`
 
-Tips:
-- Use multiple public DNS servers (8.8.8.8, 1.1.1.1) to compare views.
-- WHOIS info may be privacy-protected; check historical WHOIS via services if needed.
+Useful web services
+- crt.sh — certificate transparency lookup (find subdomains via TLS certs)
+- dnsdumpster.com — visual DNS map
+- securitytrails.com — historical DNS/WHOIS data
+
+Tips
+- Compare results across multiple public resolvers (8.8.8.8, 1.1.1.1, 9.9.9.9).
+- Certificate transparency (crt.sh) is excellent for passive subdomain discovery.
+- Always capture raw command output and record timestamps.
+
+Quick scriptable examples
+- List A records (bash):
+  - `dig +short example.com A | sort -u`
+
+- Reverse lookup for an IP (bash):
+  - `dig -x 1.2.3.4 +short`

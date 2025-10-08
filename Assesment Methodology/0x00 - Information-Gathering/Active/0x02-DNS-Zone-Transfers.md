@@ -1,16 +1,21 @@
-# 0x06 DNS Zone Transfers and Risks
+# 0x02 — DNS Zone Transfers (AXFR)
 
-Purpose: check whether authoritative name servers allow zone transfers (AXFR) which can disclose all DNS records.
+Goal: test authoritative name servers for misconfigured zone transfers (AXFR) which can leak the entire zone.
 
-Commands:
+Check authoritative NS records
+- `dig NS example.com +short`
 
-- Test AXFR with dig
-  - `dig AXFR example.com @ns1.example.com`
+Test AXFR with dig (active; only run with permission)
+- `dig AXFR example.com @ns1.example.com`
+- If successful, you'll receive all the DNS records in the zone.
 
-- Use dnsrecon
-  - `dnsrecon -d example.com -t axfr`
+Tools
+- dnsrecon: `dnsrecon -d example.com -t axfr`
+- dnsenum: `dnsenum --axfr example.com`
 
-- Use dnsenum
-  - `dnsenum --axfr example.com`
+Analysis
+- If AXFR succeeds, extract hostnames and IPs and validate whether any are in scope for further scanning.
+- Treat AXFR results as sensitive — they often contain internal hostnames and subdomains.
 
-If successful, you'll receive all hostnames and IPs managed in that DNS zone — treat results as sensitive.
+Safety
+- AXFR is an active check and may be logged. Only run against targets you are authorized to test.
