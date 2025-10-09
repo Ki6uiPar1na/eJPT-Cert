@@ -196,3 +196,126 @@ nc demo.ine.local 25
 smtp-user-enum -M RCPT -U users.txt -t demo.ine.local
 swaks --server demo.ine.local:25 --auth LOGIN --auth-user alice --auth-password 'P@ss'
 ```
+
+
+## Lab demo — merged (steps, commands, answers)
+
+This section consolidates the step-by-step lab tasks, the commands used, and concise answers. Image placeholders from the lab have been preserved as notes.
+
+### Step 1 — Access the lab / Kali machine
+- Action: Open the lab link and use the provided Kali machine or target host.
+
+### Step 2 — Identify SMTP server name and banner
+- Command(s):
+
+```bash
+nmap -sV -p 25 --script=banner demo.ine.local
+```
+- Answer (example from lab):
+  - Server: Postfix
+  - Banner: openmailbox.xyz ESMTP Postfix: Welcome to our mail server.
+
+> Note: banners vary by environment; always record exact banner text for your report.
+
+### Step 3 — Connect and retrieve the server hostname
+- Command:
+
+```bash
+nc demo.ine.local 25
+```
+- Expected Answer (example):
+  - Hostname/domain returned by the MTA: openmailbox.xyz
+
+### Step 4 — Check for user 'admin' using VRFY
+- Manual check via netcat/telnet:
+
+```bash
+nc demo.ine.local 25
+# then type:
+# EHLO attacker.example
+# VRFY admin@openmailbox.xyz
+```
+- Answer (example): Yes — VRFY returned a positive response.
+
+### Step 5 — Check for user 'commander' using VRFY
+- Command:
+
+```bash
+# using the same nc session
+VRFY commander@openmailbox.xyz
+```
+- Answer (example): No — server responded with unknown recipient (e.g., 550).
+
+### Step 6 — List supported SMTP commands / capabilities
+- Commands:
+
+```bash
+telnet demo.ine.local 25
+# then within session:
+HELO attacker.xyz
+EHLO attacker.xyz
+```
+- Look for returned EHLO capabilities such as: AUTH, STARTTLS, VRFY, EXPN, SIZE, PIPELINING.
+
+### Step 7 — Count common usernames using smtp-user-enum (dictionary A)
+- Command (example):
+
+```bash
+smtp-user-enum -U /usr/share/commix/src/txt/usernames.txt -M RCPT -t demo.ine.local
+```
+- Answer (example): 8 users found
+
+> Tip: Use RCPT mode when VRFY/EXPN are disabled. Respect rate limits and lab rules.
+
+### Step 8 — Count common usernames using Metasploit wordlist (dictionary B)
+- Commands (Metasploit flow):
+
+```bash
+msfconsole -q
+workspace -a smtp-demo
+use auxiliary/scanner/smtp/smtp_enum
+set RHOSTS demo.ine.local
+set USER_FILE /usr/share/metasploit-framework/data/wordlists/unix_users.txt
+set THREADS 10
+run
+```
+- Answer (example): 22 users found
+
+> Note: Metasploit modules may combine different enumeration techniques; compare results against other tools.
+
+### Step 9 — Send a test/fake email to root via telnet (manual DATA)
+- Commands:
+
+```bash
+telnet demo.ine.local 25
+# then type sequence (example):
+HELO attacker.xyz
+MAIL FROM:<admin@attacker.xyz>
+RCPT TO:<root@openmailbox.xyz>
+DATA
+Subject: Hi Root
+
+Hello,
+This is a fake mail sent using telnet command.
+.
+QUIT
+```
+- Note: The single dot on a line ends the DATA section. Capture server responses when reporting.
+
+### Step 10 — Send a fake mail using sendemail utility
+- Command (example):
+
+```bash
+sendemail -f admin@attacker.xyz -t root@openmailbox.xyz -s demo.ine.local -u "Fakemail" -m "Hi root, a fake from admin" -o tls=no
+```
+
+---
+
+## Conclusion
+In this lab we exercised basic Postfix SMTP reconnaissance: banner collection, manual protocol checks (VRFY/RCPT), automated enumeration (smtp-user-enum, Metasploit), and sending messages (telnet/sendemail) to demonstrate relaying/auth behaviors. Always capture outputs for reporting and avoid impacting production systems.
+
+## References
+- Postfix: http://www.postfix.org/
+- smtp-user-enum Kali docs: https://tools.kali.org/information-gathering/smtp-user-enum
+- Metasploit module: https://www.rapid7.com/db/modules/auxiliary/scanner/smtp/smtp_enum
+- sendemail manpage / docs: https://linux.die.net/man/1/sendemail
